@@ -1,0 +1,5 @@
+flask
+gunicorn
+python-slugify
+pandas
+openpyxl
