@@ -352,7 +352,7 @@ CHECK_HTML = """
         <h3 class="h6 mb-0">Можно брать (без конфликтов)</h3>
         {% if results.download_url %}
           <a class="btn btn-success btn-sm mb-2" href="{{ results.download_url }}">
-            📥 Скачать «чистый» список (Excel)
+            Скачать список (Excel)
           </a>
         {% endif %}
 
