@@ -238,7 +238,7 @@ a{color:#2563eb}.form-label{margin-top:.5rem}.badge-soft{background:#e5e7eb;colo
 </body></html>
 """
 
-INDEX_HTML = "{% extends 'base.html' %}{% block content %}<div class='card p-4'><h1 class='h4'>Меню</h1><p>Нажмите на одну из кнопок, чтобы загрузить или проверить список. Со списком загруженных можно ознакомиться, нажав на кнопку "Списки"</p></div>{% endblock %}"
+INDEX_HTML = "{% extends 'base.html' %}{% block content %}<div class='card p-4'><h1 class='h4'>Меню</h1><p>Нажмите на одну из кнопок, чтобы загрузить или проверить список. Со списком загруженных можно ознакомиться, нажав на кнопку Списки</p></div>{% endblock %}"
 
 UPLOAD_HTML = """
 {% extends 'base.html' %}{% block content %}
