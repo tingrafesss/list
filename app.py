@@ -351,9 +351,11 @@ CHECK_HTML = """
       <div class="d-flex justify-content-between align-items-center">
         <h3 class="h6 mb-0">Можно брать (без конфликтов)</h3>
         {% if results.download_url %}
-          <a class="btn btn-success btn-sm mb-2"
-             href="{{ results.download_url }}">📥 Скачать «чистый» список (Excel)</a>
+          <a class="btn btn-success btn-sm mb-2" href="{{ results.download_url }}">
+            📥 Скачать «чистый» список (Excel)
+          </a>
         {% endif %}
+
       </div>
       {% if results.clean %}
       <div class="table-responsive mt-2">
@@ -472,7 +474,9 @@ def save_result_xlsx(df: pd.DataFrame, owner: str) -> str:
     return filename
 
 def save_clean_xlsx(clean_rows, owner: str) -> str:
-    import pandas as pd
+    """
+    Сохраняет «чистые» строки в Excel во временную папку и возвращает имя файла.
+    """
     safe_owner = slugify(owner or "owner", lowercase=True) or "owner"
     filename = f"clean_{safe_owner}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.xlsx"
     path = os.path.join(tempfile.gettempdir(), filename)
@@ -662,25 +666,17 @@ def check():
                 "discount": c["discount"],
             })
 
-#  сохраняем «чистый» список в Excel для скачивания
-filename = save_clean_xlsx(clean, owner)      # ВОТ ЭТА СТРОКА — ключевая
-download_url = url_for("download_clean_file", filename=filename)
+    # сохраняем «чистый» список в Excel и даём ссылку
+    filename = save_clean_xlsx(clean, owner)
+    download_url = url_for("download_clean_file", filename=filename)
 
-results = {"conflicts": conflicts, "clean": clean, "download_url": download_url}
-return render_template_string(
-    CHECK_HTML,
-    title=f"Проверка — {APP_TITLE}",
-    app_title=APP_TITLE,
-    results=results,
-)
-
-# скачать «чистый» список
-@app.route("/download/clean/<token>")
-def download_clean(token: str):
-    payload = _CLEAN_CACHE.get(token)
-    if not payload:
-        flash("Ссылка устарела. Перезапустите проверку.", "error")
-        return redirect(url_for("check_page"))
+    results = {"conflicts": conflicts, "clean": clean, "download_url": download_url}
+    return render_template_string(
+        CHECK_HTML,
+        title=f"Проверка — {APP_TITLE}",
+        app_title=APP_TITLE,
+        results=results,
+    )
 
     # --- формируем Excel-файл (.xlsx) ---
     try:
