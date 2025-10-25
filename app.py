@@ -13,6 +13,8 @@ from __future__ import annotations
 import csv
 import io
 import os
+import tempfile                
+import pandas as pd                   
 import sqlite3
 from datetime import datetime, date
 from typing import List, Dict, Optional
@@ -26,6 +28,7 @@ from flask import (
     send_file,
     url_for,
     flash,
+    session,
 )
 from slugify import slugify
 from jinja2 import DictLoader
@@ -66,6 +69,14 @@ def build_header_map(keys: List[str]) -> Dict[str, str]:
 app = Flask(__name__)
 app.config["SECRET_KEY"] = os.environ.get("FLASK_SECRET", "dev-secret-change-me")
 app.config["MAX_CONTENT_LENGTH"] = UPLOAD_LIMIT_MB * 1024 * 1024
+from datetime import timedelta
+
+# где будем временно хранить готовые Excel-файлы
+TEMP_DIR = tempfile.gettempdir()
+
+# чтобы ссылка жила дольше (по желанию)
+app.permanent_session_lifetime = timedelta(hours=12)
+
 
 def get_db():
     if "db" not in g:
@@ -339,8 +350,10 @@ CHECK_HTML = """
     <div class="col-lg-6">
       <div class="d-flex justify-content-between align-items-center">
         <h3 class="h6 mb-0">Можно брать (без конфликтов)</h3>
-        <a class="btn btn-outline-dark btn-sm mb-2"
-           href="{{ url_for('download_clean', token=results.token) }}">⬇️ Скачать Excel</a>
+        {% if results.download_url %}
+          <a class="btn btn-success btn-sm mb-2"
+             href="{{ results.download_url }}">📥 Скачать «чистый» список (Excel)</a>
+        {% endif %}
       </div>
       {% if results.clean %}
       <div class="table-responsive mt-2">
@@ -447,6 +460,24 @@ LIST_DETAIL_HTML = """
 {% endblock %}
 """
 
+def save_result_xlsx(df: pd.DataFrame, owner: str) -> str:
+    """
+    Сохраняет итоговый DataFrame 'чистых' строк в TEMP_DIR и возвращает имя файла.
+    """
+    safe_owner = slugify(owner or "owner", lowercase=True) or "owner"
+    filename = f"result_{safe_owner}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.xlsx"
+    path = os.path.join(TEMP_DIR, filename)
+    # openpyxl уже в зависимостях
+    df.to_excel(path, index=False)
+    return filename
+
+def save_clean_xlsx(clean_rows, owner: str) -> str:
+    import pandas as pd
+    safe_owner = slugify(owner or "owner", lowercase=True) or "owner"
+    filename = f"clean_{safe_owner}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.xlsx"
+    path = os.path.join(tempfile.gettempdir(), filename)
+    pd.DataFrame(clean_rows).to_excel(path, index=False)
+    return filename
 
 # -------------------- Routes --------------------
 @app.route("/")
@@ -631,17 +662,17 @@ def check():
                 "discount": c["discount"],
             })
 
-    # сохраняем «чистый» список для скачивания
-    token = f"{owner}-{datetime.now().timestamp()}"
-    _CLEAN_CACHE[token] = {"rows": clean, "owner": owner}
+#  сохраняем «чистый» список в Excel для скачивания
+filename = save_clean_xlsx(clean, owner)      # ВОТ ЭТА СТРОКА — ключевая
+download_url = url_for("download_clean_file", filename=filename)
 
-    results = {"conflicts": conflicts, "clean": clean, "token": token}
-    return render_template_string(
-        CHECK_HTML,
-        title=f"Проверка — {APP_TITLE}",
-        app_title=APP_TITLE,
-        results=results,
-    )
+results = {"conflicts": conflicts, "clean": clean, "download_url": download_url}
+return render_template_string(
+    CHECK_HTML,
+    title=f"Проверка — {APP_TITLE}",
+    app_title=APP_TITLE,
+    results=results,
+)
 
 # скачать «чистый» список
 @app.route("/download/clean/<token>")
@@ -736,6 +767,35 @@ def list_detail(owner, start, end):
 
 # ------------- Jinja loader -------------
 app.jinja_loader = DictLoader({'base.html': BASE_HTML})
+
+@app.route("/download_result")
+def download_result():
+    filename = session.get("last_result_filename")
+    if not filename:
+        flash("Ссылка устарела. Перезапустите проверку.", "error")
+        return redirect(url_for("check_page"))
+
+    path = os.path.join(TEMP_DIR, filename)
+    if not os.path.exists(path):
+        flash("Файл не найден. Проверьте ещё раз.", "error")
+        return redirect(url_for("check_page"))
+
+    # отдадим как вложение
+    return send_file(path, as_attachment=True, download_name=filename, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+@app.route("/download/clean/<path:filename>")
+def download_clean_file(filename: str):
+    path = os.path.join(tempfile.gettempdir(), filename)
+    if not os.path.exists(path):
+        flash("Файл больше недоступен. Повторите проверку.", "error")
+        return redirect(url_for("check_page"))
+    return send_file(
+        path,
+        as_attachment=True,
+        download_name=filename,
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+
 
 if __name__ == "__main__":
     with app.app_context():
