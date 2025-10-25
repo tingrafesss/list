@@ -230,8 +230,8 @@ a{color:#2563eb}.form-label{margin-top:.5rem}.badge-soft{background:#e5e7eb;colo
 </head><body>
 <nav class="navbar navbar-expand-lg navbar-light mb-4"><div class="container">
 <a class="navbar-brand" href="{{ url_for('index') }}">📚 {{ app_title }}</a>
-<div class="d-flex gap-2"><a class="btn btn-sm btn-outline-dark" href="{{ url_for('upload_page') }}">Загрузить книги</a>
-<a class="btn btn-sm btn-primary" href="{{ url_for('check_page') }}">Проверить пересечения</a></div></div></nav>
+<div class="d-flex gap-2"><a class="btn btn-sm btn-outline-dark" href="{{ url_for('upload_page') }}">Загрузить список</a>
+<a class="btn btn-sm btn-primary" href="{{ url_for('check_page') }}">Проверить совпадения</a></div></div></nav>
 <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('lists') }}">Списки</a>
 <div class="container">{% with messages = get_flashed_messages(with_categories=true) %}{% if messages %}{% for c,m in messages %}
 <div class="alert alert-{{ 'danger' if c=='error' else c }}">{{ m }}</div>{% endfor %}{% endif %}{% endwith %}{% block content %}{% endblock %}</div>
@@ -246,7 +246,7 @@ UPLOAD_HTML = """
   <h1 class="h4">Загрузить список</h1>
   <form method="post" enctype="multipart/form-data" action="{{ url_for('upload') }}" class="mt-3">
     <div class="row g-3">
-      <div class="col-md-3"><label class="form-label">Ваше имя</label><input name="owner" class="form-control" required placeholder="например, Anna"/></div>
+      <div class="col-md-3"><label class="form-label">Название</label><input name="owner" class="form-control" required placeholder="Ввести"/></div>
       <div class="col-md-3"><label class="form-label">Начало скидки</label><input type="date" name="start" class="form-control" required/></div>
       <div class="col-md-3"><label class="form-label">Конец скидки</label><input type="date" name="end" class="form-control" required/></div>
       <div class="col-md-3"><label class="form-label">Файл CSV/Excel</label><input type="file" name="file" class="form-control" accept=".csv,.xlsx,.xls" required/></div>
@@ -265,8 +265,8 @@ CHECK_HTML = """
   <form method="post" enctype="multipart/form-data" action="{{ url_for('check') }}" class="mt-3">
     <div class="row g-3">
       <div class="col-md-4">
-        <label class="form-label">Ваше имя</label>
-        <input name="owner" class="form-control" required placeholder="например, OtherStore" />
+        <label class="form-label">Название</label>
+        <input name="owner" class="form-control" required placeholder="Ввести" />
       </div>
       <div class="col-md-4">
         <label class="form-label">Период вашей акции — начало</label>
