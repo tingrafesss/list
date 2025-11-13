@@ -166,6 +166,22 @@ def sniff_delimiter(text: str) -> str:
         return ","
 
 
+def clean_str(val) -> Optional[str]:
+    """
+    Превращает значение из pandas/csv в нормальную строку:
+    - None / пустое / NaN -> None
+    - нормальная строка/число -> строка без лишних пробелов
+    """
+    if val is None:
+        return None
+    s = str(val).strip()
+    if not s:
+        return None
+    if s.lower() == "nan":
+        return None
+    return s
+
+
 # --- Excel header row detection ---
 def detect_header_row_xlsx(content: bytes) -> Optional[int]:
     try:
@@ -683,12 +699,12 @@ def upload():
         rows_to_insert = []
         for r in rows:
             book_id = normalize_id(r.get("id"))
-            title = (str(r.get("title") or "").strip()) or None
-            author = (str(r.get("author") or "").strip()) or None
-            fmt = (str(r.get("fmt") or "").strip()) or None
-            category = (str(r.get("category") or "").strip()) or None
-            price = (str(r.get("price") or "").strip()) or None
-            disc = (str(r.get("discount") or "").strip()) or None
+            title = clean_str(r.get("title"))
+            author = clean_str(r.get("author"))
+            fmt = clean_str(r.get("fmt"))
+            category = clean_str(r.get("category"))
+            price = clean_str(r.get("price"))
+            disc = clean_str(r.get("discount"))
             if not book_id and not title:
                 continue
             rows_to_insert.append(
@@ -790,12 +806,12 @@ def check():
         candidates = []
         for r in rows:
             book_id = normalize_id(r.get("id")) or None
-            title = (str(r.get("title") or "").strip()) or None
-            author = (str(r.get("author") or "").strip()) or None
-            fmt = (str(r.get("fmt") or "").strip()) or None
-            category = (str(r.get("category") or "").strip()) or None
-            price = (str(r.get("price") or "").strip()) or None
-            disc = (str(r.get("discount") or "").strip()) or None
+            title = clean_str(r.get("title"))
+            author = clean_str(r.get("author"))
+            fmt = clean_str(r.get("fmt"))
+            category = clean_str(r.get("category"))
+            price = clean_str(r.get("price"))
+            disc = clean_str(r.get("discount"))
             if not book_id and not title:
                 continue
             candidates.append(
@@ -1086,4 +1102,3 @@ if __name__ == "__main__":
     with app.app_context():
         get_db()
     app.run(debug=True, host="127.0.0.1", port=8000, use_reloader=False)
-
