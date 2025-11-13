@@ -13,10 +13,10 @@ from __future__ import annotations
 import csv
 import io
 import os
-import tempfile                
-import pandas as pd                   
+import tempfile
+import pandas as pd
 import sqlite3
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from typing import List, Dict, Optional
 
 from flask import (
@@ -38,6 +38,9 @@ DB_PATH = os.environ.get("BOOKCHECK_DB", "bookcheck.sqlite3")
 UPLOAD_LIMIT_MB = 12
 ALLOWED_EXT = {".csv", ".xlsx", ".xls"}
 
+# где будем временно хранить готовые Excel-файлы
+TEMP_DIR = tempfile.gettempdir()
+
 # ---- tokens for fuzzy header matching ----
 HEADER_TOKENS = {
     "id": ["id", "ид", "код", "артикул", "bookid", "номеркниги", "номер", "кодкниги"],
@@ -49,8 +52,10 @@ HEADER_TOKENS = {
     "discount": ["discount", "скидка", "percent", "процент"],
 }
 
+
 def key_norm(s: str) -> str:
     return "".join(ch.lower() for ch in str(s) if ch.isalnum())
+
 
 def build_header_map(keys: List[str]) -> Dict[str, str]:
     norm_keys = {key_norm(k): k for k in keys}
@@ -66,14 +71,10 @@ def build_header_map(keys: List[str]) -> Dict[str, str]:
                 break
     return mapping
 
+
 app = Flask(__name__)
 app.config["SECRET_KEY"] = os.environ.get("FLASK_SECRET", "dev-secret-change-me")
 app.config["MAX_CONTENT_LENGTH"] = UPLOAD_LIMIT_MB * 1024 * 1024
-from datetime import timedelta
-
-# где будем временно хранить готовые Excel-файлы
-TEMP_DIR = tempfile.gettempdir()
-
 # чтобы ссылка жила дольше (по желанию)
 app.permanent_session_lifetime = timedelta(hours=12)
 
@@ -84,11 +85,13 @@ def get_db():
         g.db.row_factory = sqlite3.Row
     return g.db
 
+
 @app.teardown_appcontext
 def close_db(exception=None):
     db = g.pop("db", None)
     if db is not None:
         db.close()
+
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS books (
@@ -124,17 +127,21 @@ with app.app_context():
                 pass
     db.commit()
 
+
 def parse_date(s: str) -> date:
     return datetime.strptime(s.strip(), "%Y-%m-%d").date()
+
 
 def norm_title(s: Optional[str]) -> Optional[str]:
     if not s:
         return None
     return slugify(s, lowercase=True).replace("-", "")
 
+
 def allowed_file(filename: str) -> bool:
     ext = os.path.splitext(filename)[1].lower()
     return ext in ALLOWED_EXT
+
 
 def normalize_id(val) -> str:
     if val is None or val == "":
@@ -147,15 +154,17 @@ def normalize_id(val) -> str:
         pass
     return str(val).strip()
 
+
 def sniff_delimiter(text: str) -> str:
     sample = text[:4096]
     try:
-        dialect = csv.Sniffer().sniff(sample, delimiters=[",",";","\\t","|"])
+        dialect = csv.Sniffer().sniff(sample, delimiters=[",", ";", "\t", "|"])
         return dialect.delimiter
     except Exception:
         if ";" in sample and "," not in sample.splitlines()[0]:
             return ";"
         return ","
+
 
 # --- Excel header row detection ---
 def detect_header_row_xlsx(content: bytes) -> Optional[int]:
@@ -167,12 +176,13 @@ def detect_header_row_xlsx(content: bytes) -> Optional[int]:
     best_idx, best_score = None, -1
     for i in range(min(20, len(df))):
         row_vals = [str(x) for x in list(df.iloc[i].values)]
-        keys = [str(v) for v in row_vals if v and str(v) != 'nan']
+        keys = [str(v) for v in row_vals if v and str(v) != "nan"]
         mapping = build_header_map(keys)
         score = len(mapping)
         if ("id" in mapping or "title" in mapping) and score > best_score:
             best_idx, best_score = i, score
     return best_idx
+
 
 # ---- Tabular readers (CSV/Excel) ----
 def read_table(file_storage, mode: str) -> List[dict]:
@@ -205,13 +215,20 @@ def read_table(file_storage, mode: str) -> List[dict]:
     norm_rows: List[dict] = []
     for r in raw_rows:
         # make also a lowercase-key view for robustness
-        lower = {str(k): (v.strip() if isinstance(v, str) else ("" if v is None else v)) for k, v in r.items()}
+        lower = {
+            str(k): (
+                v.strip()
+                if isinstance(v, str)
+                else ("" if v is None else v)
+            )
+            for k, v in r.items()
+        }
         row_norm = {}
         for internal, orig_key in header_map.items():
             row_norm[internal] = lower.get(orig_key, lower.get(str(orig_key).lower(), ""))
         # fallback for title if mapping failed
         if "title" not in row_norm or row_norm["title"] == "":
-            for k in ("title","наименование","название","Наименование","Название"):
+            for k in ("title", "наименование", "название", "Наименование", "Название"):
                 if k in lower and lower[k]:
                     row_norm["title"] = lower[k]
                     break
@@ -230,7 +247,8 @@ def read_table(file_storage, mode: str) -> List[dict]:
 
     return norm_rows
 
-# -------------------- Templates (коротко) --------------------
+
+# -------------------- Templates --------------------
 BASE_HTML = """
 <!doctype html><html lang="ru"><head>
 <meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/>
@@ -241,15 +259,34 @@ a{color:#2563eb}.form-label{margin-top:.5rem}.badge-soft{background:#e5e7eb;colo
 </head><body>
 <nav class="navbar navbar-expand-lg navbar-light mb-4"><div class="container">
 <a class="navbar-brand" href="{{ url_for('index') }}">📚 {{ app_title }}</a>
-<div class="d-flex gap-2"><a class="btn btn-sm btn-outline-dark" href="{{ url_for('upload_page') }}">Загрузить список</a>
-<a class="btn btn-sm btn-primary" href="{{ url_for('check_page') }}">Проверить совпадения</a></div></div></nav>
-<a class="btn btn-sm btn-outline-secondary" href="{{ url_for('lists') }}">Списки</a>
-<div class="container">{% with messages = get_flashed_messages(with_categories=true) %}{% if messages %}{% for c,m in messages %}
-<div class="alert alert-{{ 'danger' if c=='error' else c }}">{{ m }}</div>{% endfor %}{% endif %}{% endwith %}{% block content %}{% endblock %}</div>
+<div class="d-flex gap-2">
+  <a class="btn btn-sm btn-outline-dark" href="{{ url_for('upload_page') }}">Загрузить список</a>
+  <a class="btn btn-sm btn-primary" href="{{ url_for('check_page') }}">Проверить совпадения</a>
+  <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('lists') }}">Списки</a>
+</div>
+</div></nav>
+<div class="container">
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      {% for c,m in messages %}
+        <div class="alert alert-{{ 'danger' if c=='error' else c }}">{{ m }}</div>
+      {% endfor %}
+    {% endif %}
+  {% endwith %}
+  {% block content %}{% endblock %}
+</div>
 </body></html>
 """
 
-INDEX_HTML = "{% extends 'base.html' %}{% block content %}<div class='card p-4'><h1 class='h4'>Меню</h1><p>Нажмите на одну из кнопок, чтобы загрузить или проверить список. Со списком загруженных можно ознакомиться, нажав на кнопку Списки</p></div>{% endblock %}"
+INDEX_HTML = """
+{% extends 'base.html' %}
+{% block content %}
+<div class='card p-4'>
+  <h1 class='h4'>Меню</h1>
+  <p>Нажмите на одну из кнопок вверху, чтобы загрузить или проверить список. Со всеми загруженными списками можно ознакомиться по кнопке «Списки».</p>
+</div>
+{% endblock %}
+"""
 
 UPLOAD_HTML = """
 {% extends 'base.html' %}{% block content %}
@@ -292,6 +329,42 @@ CHECK_HTML = """
         <input type="file" name="file" class="form-control" accept=".csv,.xlsx,.xls" required />
       </div>
     </div>
+
+    {% if lists %}
+    <div class="mt-3">
+      <label class="form-label">С какими загруженными списками сравнивать</label>
+      <p class="form-text">Если ничего не выбрано, сравнение будет со всеми списками.</p>
+      <div class="table-responsive">
+        <table class="table table-sm mb-0">
+          <thead>
+            <tr>
+              <th style="width: 1%;"></th>
+              <th>Магазин</th>
+              <th>Начало</th>
+              <th>Конец</th>
+              <th>Позиций</th>
+            </tr>
+          </thead>
+          <tbody>
+          {% for r in lists %}
+            {% set key = r['owner'] ~ '|' ~ r['start_date'] ~ '|' ~ r['end_date'] %}
+            <tr>
+              <td>
+                <input type="checkbox" name="lists" value="{{ key }}"
+                       {% if key in selected_keys %}checked{% endif %}>
+              </td>
+              <td>{{ r['owner'] }}</td>
+              <td>{{ r['start_date'] }}</td>
+              <td>{{ r['end_date'] }}</td>
+              <td>{{ r['total'] }}</td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    {% endif %}
+
     <button class="btn btn-primary mt-3">Проверить</button>
   </form>
 </div>
@@ -355,7 +428,6 @@ CHECK_HTML = """
             Скачать список (Excel)
           </a>
         {% endif %}
-
       </div>
       {% if results.clean %}
       <div class="table-responsive mt-2">
@@ -390,16 +462,67 @@ CHECK_HTML = """
 {% endif %}
 {% endblock %}
 """
+
 LISTS_HTML = """
 {% extends 'base.html' %}
 {% block content %}
 <div class="card p-4">
-  <h1 class="h4">📜 Загруженные списки</h1>
+  <h1 class="h4">Загруженные списки</h1>
+
+  <form method="get" class="row g-2 mt-3">
+    <div class="col-md-3">
+      <label class="form-label">Магазин</label>
+      <input type="text" name="owner" class="form-control"
+             value="{{ filter_owner or '' }}"
+             placeholder="Например, ЛитРес">
+    </div>
+    <div class="col-md-3">
+      <label class="form-label">Начало не раньше</label>
+      <input type="date" name="date_from" class="form-control"
+             value="{{ filter_date_from or '' }}">
+    </div>
+    <div class="col-md-3">
+      <label class="form-label">Конец не позже</label>
+      <input type="date" name="date_to" class="form-control"
+             value="{{ filter_date_to or '' }}">
+    </div>
+    <div class="col-md-3">
+      <label class="form-label">Сортировка</label>
+      <select class="form-select" name="sort">
+        <option value="created_desc"
+          {% if sort == 'created_desc' or not sort %}selected{% endif %}>
+          По дате загрузки (новые сверху)
+        </option>
+        <option value="start_asc" {% if sort == 'start_asc' %}selected{% endif %}>
+          По началу акции (раньше → позже)
+        </option>
+        <option value="start_desc" {% if sort == 'start_desc' %}selected{% endif %}>
+          По началу акции (позже → раньше)
+        </option>
+        <option value="end_asc" {% if sort == 'end_asc' %}selected{% endif %}>
+          По концу акции (раньше → позже)
+        </option>
+        <option value="end_desc" {% if sort == 'end_desc' %}selected{% endif %}>
+          По концу акции (позже → раньше)
+        </option>
+      </select>
+    </div>
+    <div class="col-md-2 d-flex align-items-end">
+      <button class="btn btn-primary w-100">Фильтровать</button>
+    </div>
+  </form>
+
   {% if rows %}
   <div class="table-responsive mt-3">
     <table class="table table-sm">
       <thead>
-        <tr><th>Магазин</th><th>Начало</th><th>Конец</th><th>Позиций</th><th></th></tr>
+        <tr>
+          <th>Магазин</th>
+          <th>Начало</th>
+          <th>Конец</th>
+          <th>Позиций</th>
+          <th class="text-nowrap">Действия</th>
+        </tr>
       </thead>
       <tbody>
       {% for r in rows %}
@@ -408,11 +531,20 @@ LISTS_HTML = """
           <td>{{ r['start_date'] }}</td>
           <td>{{ r['end_date'] }}</td>
           <td>{{ r['total'] }}</td>
-          <td>
-            <a class="btn btn-sm btn-outline-primary"
+          <td class="text-nowrap">
+            <a class="btn btn-sm btn-outline-secondary"
                href="{{ url_for('list_detail', owner=r['owner'], start=r['start_date'], end=r['end_date']) }}">
               Просмотр
             </a>
+            <form method="post"
+                  action="{{ url_for('delete_list') }}"
+                  style="display:inline-block; margin-left: 0.5rem;"
+                  onsubmit="return confirm('Удалить этот список целиком?');">
+              <input type="hidden" name="owner" value="{{ r['owner'] }}">
+              <input type="hidden" name="start" value="{{ r['start_date'] }}">
+              <input type="hidden" name="end" value="{{ r['end_date'] }}">
+              <button class="btn btn-sm btn-outline-danger">Удалить</button>
+            </form>
           </td>
         </tr>
       {% endfor %}
@@ -462,6 +594,7 @@ LIST_DETAIL_HTML = """
 {% endblock %}
 """
 
+
 def save_result_xlsx(df: pd.DataFrame, owner: str) -> str:
     """
     Сохраняет итоговый DataFrame 'чистых' строк в TEMP_DIR и возвращает имя файла.
@@ -469,28 +602,61 @@ def save_result_xlsx(df: pd.DataFrame, owner: str) -> str:
     safe_owner = slugify(owner or "owner", lowercase=True) or "owner"
     filename = f"result_{safe_owner}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.xlsx"
     path = os.path.join(TEMP_DIR, filename)
-    # openpyxl уже в зависимостях
     df.to_excel(path, index=False)
     return filename
+
 
 def save_clean_xlsx(clean_rows, owner: str) -> str:
     """
     Сохраняет «чистые» строки в Excel во временную папку и возвращает имя файла.
+    В колонке "discount" значения приводятся к формату с % (например 0.4 -> "40%").
     """
     safe_owner = slugify(owner or "owner", lowercase=True) or "owner"
     filename = f"clean_{safe_owner}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.xlsx"
     path = os.path.join(tempfile.gettempdir(), filename)
-    pd.DataFrame(clean_rows).to_excel(path, index=False)
+
+    df = pd.DataFrame(clean_rows)
+
+    if "discount" in df.columns:
+        def format_discount(val):
+            if val is None:
+                return ""
+            s = str(val).strip()
+            if not s:
+                return ""
+            # убираем уже существующий знак %
+            s = s.replace("%", "").replace(",", ".")
+            try:
+                num = float(s)
+                # если это доля (0.4), превращаем в проценты (40)
+                if 0 <= num <= 1:
+                    num = num * 100
+                # убираем .0 у целых
+                if abs(num - int(num)) < 1e-6:
+                    num = int(num)
+                return f"{num}%"
+            except Exception:
+                # если ничего не вышло, отдаём как есть
+                return str(val)
+
+        df["discount"] = df["discount"].map(format_discount)
+
+    df.to_excel(path, index=False)
     return filename
+
 
 # -------------------- Routes --------------------
 @app.route("/")
 def index():
     return render_template_string(INDEX_HTML, title=APP_TITLE, app_title=APP_TITLE)
 
+
 @app.route("/upload", methods=["GET"])
 def upload_page():
-    return render_template_string(UPLOAD_HTML, title=f"Загрузка — {APP_TITLE}", app_title=APP_TITLE)
+    return render_template_string(
+        UPLOAD_HTML, title=f"Загрузка — {APP_TITLE}", app_title=APP_TITLE
+    )
+
 
 @app.route("/upload", methods=["POST"])
 def upload():
@@ -499,47 +665,87 @@ def upload():
     end = request.form.get("end", "").strip()
     file = request.files.get("file")
     if not owner or not start or not end or not file or file.filename == "":
-        flash("Заполните поля и выберите файл.", "error"); return redirect(url_for("upload_page"))
+        flash("Заполните поля и выберите файл.", "error")
+        return redirect(url_for("upload_page"))
     try:
-        s = parse_date(start); e = parse_date(end); 
-        if e < s: raise ValueError("Конец периода раньше начала.")
+        s = parse_date(start)
+        e = parse_date(end)
+        if e < s:
+            raise ValueError("Конец периода раньше начала.")
     except Exception as ex:
-        flash(f"Неверные даты: {ex}", "error"); return redirect(url_for("upload_page"))
+        flash(f"Неверные даты: {ex}", "error")
+        return redirect(url_for("upload_page"))
     if not allowed_file(file.filename):
-        flash("Разрешены только .csv/.xlsx/.xls", "error"); return redirect(url_for("upload_page"))
+        flash("Разрешены только .csv/.xlsx/.xls", "error")
+        return redirect(url_for("upload_page"))
     try:
         rows = read_table(file, mode="upload")
         rows_to_insert = []
         for r in rows:
             book_id = normalize_id(r.get("id"))
-            title   = (str(r.get("title") or "").strip()) or None
-            author  = (str(r.get("author") or "").strip()) or None
-            fmt     = (str(r.get("fmt") or "").strip()) or None
-            category= (str(r.get("category") or "").strip()) or None
-            price   = (str(r.get("price") or "").strip()) or None
-            disc    = (str(r.get("discount") or "").strip()) or None
+            title = (str(r.get("title") or "").strip()) or None
+            author = (str(r.get("author") or "").strip()) or None
+            fmt = (str(r.get("fmt") or "").strip()) or None
+            category = (str(r.get("category") or "").strip()) or None
+            price = (str(r.get("price") or "").strip()) or None
+            disc = (str(r.get("discount") or "").strip()) or None
             if not book_id and not title:
                 continue
-            rows_to_insert.append((owner, book_id or None, title, (slugify(title, lowercase=True).replace('-','') if title else None),
-                                   fmt, author, category, price, disc, s.isoformat(), e.isoformat(), datetime.utcnow().isoformat()))
-        if not rows_to_insert: raise ValueError("Нет валидных строк.")
+            rows_to_insert.append(
+                (
+                    owner,
+                    book_id or None,
+                    title,
+                    (slugify(title, lowercase=True).replace("-", "") if title else None),
+                    fmt,
+                    author,
+                    category,
+                    price,
+                    disc,
+                    s.isoformat(),
+                    e.isoformat(),
+                    datetime.utcnow().isoformat(),
+                )
+            )
+        if not rows_to_insert:
+            raise ValueError("Нет валидных строк.")
         db = get_db()
-        db.executemany("""
+        db.executemany(
+            """
             INSERT INTO books(owner, book_id, title, title_key, fmt, author, category, price, discount, start_date, end_date, created_at)
             VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
-        """, rows_to_insert)
+        """,
+            rows_to_insert,
+        )
         db.commit()
         flash(f"Успех: добавлено {len(rows_to_insert)} записей.", "success")
     except Exception as e:
         flash(f"Ошибка: {e}", "error")
     return redirect(url_for("upload_page"))
 
+
 @app.route("/check", methods=["GET"])
 def check_page():
-    return render_template_string(CHECK_HTML, title=f"Проверка — {APP_TITLE}", app_title=APP_TITLE, results=None)
+    db = get_db()
+    lists = db.execute(
+        """
+        SELECT owner, start_date, end_date, COUNT(*) as total,
+               MIN(created_at) as created_at
+        FROM books
+        GROUP BY owner, start_date, end_date
+        ORDER BY created_at DESC
+    """
+    ).fetchall()
 
-# КЭШ для выгрузки "чистого" списка
-_CLEAN_CACHE: Dict[str, Dict] = {}
+    return render_template_string(
+        CHECK_HTML,
+        title=f"Проверка — {APP_TITLE}",
+        app_title=APP_TITLE,
+        results=None,
+        lists=lists,
+        selected_keys=[],
+    )
+
 
 @app.route("/check", methods=["POST"])
 def check():
@@ -551,6 +757,14 @@ def check():
     if not owner or not start or not end:
         flash("Заполните все поля.", "error")
         return redirect(url_for("check_page"))
+
+    # какие списки участвуют в проверке
+    selected_keys = request.form.getlist("lists")  # список строк вида "owner|start|end"
+    selected_lists = []
+    for key in selected_keys:
+        parts = key.split("|", 3)
+        if len(parts) == 3:
+            selected_lists.append((parts[0], parts[1], parts[2]))
 
     # валидация дат
     try:
@@ -576,24 +790,26 @@ def check():
         candidates = []
         for r in rows:
             book_id = normalize_id(r.get("id")) or None
-            title   = (str(r.get("title") or "").strip()) or None
-            author  = (str(r.get("author") or "").strip()) or None
-            fmt     = (str(r.get("fmt") or "").strip()) or None
-            category= (str(r.get("category") or "").strip()) or None
-            price   = (str(r.get("price") or "").strip()) or None
-            disc    = (str(r.get("discount") or "").strip()) or None
+            title = (str(r.get("title") or "").strip()) or None
+            author = (str(r.get("author") or "").strip()) or None
+            fmt = (str(r.get("fmt") or "").strip()) or None
+            category = (str(r.get("category") or "").strip()) or None
+            price = (str(r.get("price") or "").strip()) or None
+            disc = (str(r.get("discount") or "").strip()) or None
             if not book_id and not title:
                 continue
-            candidates.append({
-                "book_id": book_id,
-                "title": title,
-                "title_key": (norm_title(title) if title else None),
-                "author": author,
-                "fmt": fmt,
-                "category": category,
-                "price": price,
-                "discount": disc,
-            })
+            candidates.append(
+                {
+                    "book_id": book_id,
+                    "title": title,
+                    "title_key": (norm_title(title) if title else None),
+                    "author": author,
+                    "fmt": fmt,
+                    "category": category,
+                    "price": price,
+                    "discount": disc,
+                }
+            )
         if not candidates:
             raise ValueError("Нет валидных строк.")
     except Exception as e:
@@ -602,26 +818,38 @@ def check():
 
     # собираем потенциальные совпадения одним запросом
     ids = [c["book_id"] for c in candidates if c["book_id"]]
-    title_keys = [c["title_key"] for c in candidates if (not c["book_id"]) and c["title_key"]]
+    title_keys = [
+        c["title_key"] for c in candidates if (not c["book_id"]) and c["title_key"]
+    ]
 
     db = get_db()
     sql_parts = []
     params: List = []
     if ids:
-        sql_parts.append(f"(book_id IN ({','.join(['?']*len(ids))}))")
+        sql_parts.append(f"(book_id IN ({','.join(['?'] * len(ids))}))")
         params.extend(ids)
     if title_keys:
-        sql_parts.append(f"(book_id IS NULL AND title_key IN ({','.join(['?']*len(title_keys))}))")
+        sql_parts.append(
+            f"(book_id IS NULL AND title_key IN ({','.join(['?'] * len(title_keys))}))"
+        )
         params.extend(title_keys)
 
     sql_where = " OR ".join(sql_parts) if sql_parts else "1=0"
-    # пересечение по датам: есть overlap с [s, e]
     sql = f"""
         SELECT * FROM books
         WHERE ({sql_where})
           AND NOT (date(end_date) < date(?) OR date(?) < date(start_date))
     """
     params.extend([s.isoformat(), s.isoformat()])
+
+    # ограничиваем поиск только выбранными списками, если они есть
+    if selected_lists:
+        list_clauses = []
+        for (o, st, en) in selected_lists:
+            list_clauses.append("(owner = ? AND start_date = ? AND end_date = ?)")
+            params.extend([o, st, en])
+        sql += " AND (" + " OR ".join(list_clauses) + ")"
+
     hits = db.execute(sql, params).fetchall() if sql_parts else []
 
     # индексируем найденные совпадения
@@ -642,127 +870,183 @@ def check():
             matched = by_tk[c["title_key"]]
 
         if matched:
-            conflicts.append({
-                "book_id": c["book_id"],
-                "title": c["title"],
-                "author": c["author"],
-                "fmt": c["fmt"],
-                "category": c["category"],
-                "price": c["price"],
-                "discount": c["discount"],
-                "matches": [
-                    {"owner": m["owner"], "start_date": m["start_date"], "end_date": m["end_date"]}
-                    for m in matched
-                ],
-            })
+            conflicts.append(
+                {
+                    "book_id": c["book_id"],
+                    "title": c["title"],
+                    "author": c["author"],
+                    "fmt": c["fmt"],
+                    "category": c["category"],
+                    "price": c["price"],
+                    "discount": c["discount"],
+                    "matches": [
+                        {
+                            "owner": m["owner"],
+                            "start_date": m["start_date"],
+                            "end_date": m["end_date"],
+                        }
+                        for m in matched
+                    ],
+                }
+            )
         else:
-            clean.append({
-                "book_id": c["book_id"],
-                "title": c["title"],
-                "author": c["author"],
-                "fmt": c["fmt"],
-                "category": c["category"],
-                "price": c["price"],
-                "discount": c["discount"],
-            })
+            clean.append(
+                {
+                    "book_id": c["book_id"],
+                    "title": c["title"],
+                    "author": c["author"],
+                    "fmt": c["fmt"],
+                    "category": c["category"],
+                    "price": c["price"],
+                    "discount": c["discount"],
+                }
+            )
 
     # сохраняем «чистый» список в Excel и даём ссылку
     filename = save_clean_xlsx(clean, owner)
     download_url = url_for("download_clean_file", filename=filename)
 
     results = {"conflicts": conflicts, "clean": clean, "download_url": download_url}
-    return render_template_string(
-        CHECK_HTML,
-        title=f"Проверка — {APP_TITLE}",
-        app_title=APP_TITLE,
-        results=results,
-    )
 
-    # --- формируем Excel-файл (.xlsx) ---
-    try:
-        from openpyxl import Workbook
-    except ImportError:
-        flash("Нужно установить openpyxl: pip install openpyxl", "error")
-        return redirect(url_for("check_page"))
-
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "Чистые позиции"
-
-    # шапка
-    headers = ["ID", "Наименование", "Автор", "Тип", "Категория", "Цена", "Скидка"]
-    ws.append(headers)
-
-    # строки
-    for r in payload["rows"]:
-        ws.append([
-            r.get("book_id") or "",
-            r.get("title") or "",
-            r.get("author") or "",
-            r.get("fmt") or "",
-            r.get("category") or "",
-            r.get("price") or "",
-            r.get("discount") or "",
-        ])
-
-    # сохраняем в память
-    from io import BytesIO
-    mem = BytesIO()
-    wb.save(mem)
-    mem.seek(0)
-
-    filename = f"clean_{slugify(payload['owner'])}_{datetime.now().strftime('%Y%m%d%H%M%S')}.xlsx"
-    return send_file(
-        mem,
-        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        as_attachment=True,
-        download_name=filename,
-    )
-
-@app.route("/ping")
-def ping():
-    return "ok", 200
-
-@app.route("/lists")
-def lists():
-    db = get_db()
-    # группируем по owner, start_date, end_date
-    rows = db.execute("""
+    # понадобятся те же lists, что и на GET-странице
+    lists = db.execute(
+        """
         SELECT owner, start_date, end_date, COUNT(*) as total,
                MIN(created_at) as created_at
         FROM books
         GROUP BY owner, start_date, end_date
         ORDER BY created_at DESC
-    """).fetchall()
+    """
+    ).fetchall()
 
-    return render_template_string(LISTS_HTML,
+    return render_template_string(
+        CHECK_HTML,
+        title=f"Проверка — {APP_TITLE}",
+        app_title=APP_TITLE,
+        results=results,
+        lists=lists,
+        selected_keys=selected_keys,
+    )
+
+
+@app.route("/ping")
+def ping():
+    return "ok", 200
+
+
+@app.route("/lists")
+def lists():
+    db = get_db()
+
+    owner = request.args.get("owner", "").strip()
+    date_from = request.args.get("date_from", "").strip()
+    date_to = request.args.get("date_to", "").strip()
+    sort = request.args.get("sort", "created_desc")
+
+    sql = """
+        SELECT owner, start_date, end_date, COUNT(*) as total,
+               MIN(created_at) as created_at
+        FROM books
+    """
+    clauses = []
+    params: List = []
+
+    if owner:
+        clauses.append("owner LIKE ?")
+        params.append(f"%{owner}%")
+
+    if date_from:
+        clauses.append("date(start_date) >= date(?)")
+        params.append(date_from)
+
+    if date_to:
+        clauses.append("date(end_date) <= date(?)")
+        params.append(date_to)
+
+    if clauses:
+        sql += " WHERE " + " AND ".join(clauses)
+
+    # сортировка
+    if sort == "start_asc":
+        order_clause = "ORDER BY date(start_date) ASC, date(end_date) ASC"
+    elif sort == "start_desc":
+        order_clause = "ORDER BY date(start_date) DESC, date(end_date) DESC"
+    elif sort == "end_asc":
+        order_clause = "ORDER BY date(end_date) ASC, date(start_date) ASC"
+    elif sort == "end_desc":
+        order_clause = "ORDER BY date(end_date) DESC, date(start_date) DESC"
+    else:  # created_desc по умолчанию
+        order_clause = "ORDER BY created_at DESC"
+
+    sql += f"""
+        GROUP BY owner, start_date, end_date
+        {order_clause}
+    """
+
+    rows = db.execute(sql, params).fetchall()
+
+    return render_template_string(
+        LISTS_HTML,
         title=f"Загруженные списки — {APP_TITLE}",
         app_title=APP_TITLE,
-        rows=rows
+        rows=rows,
+        filter_owner=owner,
+        filter_date_from=date_from,
+        filter_date_to=date_to,
+        sort=sort,
     )
+
 
 @app.route("/lists/<owner>/<start>/<end>")
 def list_detail(owner, start, end):
     db = get_db()
-    items = db.execute("""
+    items = db.execute(
+        """
         SELECT book_id, title, author, fmt, category, price, discount
         FROM books
         WHERE owner = ? AND start_date = ? AND end_date = ?
         ORDER BY title
-    """, (owner, start, end)).fetchall()
+    """,
+        (owner, start, end),
+    ).fetchall()
 
-    return render_template_string(LIST_DETAIL_HTML,
+    return render_template_string(
+        LIST_DETAIL_HTML,
         title=f"Список {owner} {start}–{end}",
         app_title=APP_TITLE,
         owner=owner,
         start=start,
         end=end,
-        items=items
+        items=items,
     )
 
 
+@app.route("/lists/delete", methods=["POST"])
+def delete_list():
+    owner = request.form.get("owner", "").strip()
+    start = request.form.get("start", "").strip()
+    end = request.form.get("end", "").strip()
+
+    if not owner or not start or not end:
+        flash("Не удалось определить список для удаления.", "error")
+        return redirect(url_for("lists"))
+
+    db = get_db()
+    db.execute(
+        """
+        DELETE FROM books
+        WHERE owner = ? AND start_date = ? AND end_date = ?
+        """,
+        (owner, start, end),
+    )
+    db.commit()
+    flash("Список удалён.", "success")
+    return redirect(url_for("lists"))
+
+
 # ------------- Jinja loader -------------
-app.jinja_loader = DictLoader({'base.html': BASE_HTML})
+app.jinja_loader = DictLoader({"base.html": BASE_HTML})
+
 
 @app.route("/download_result")
 def download_result():
@@ -776,8 +1060,13 @@ def download_result():
         flash("Файл не найден. Проверьте ещё раз.", "error")
         return redirect(url_for("check_page"))
 
-    # отдадим как вложение
-    return send_file(path, as_attachment=True, download_name=filename, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    return send_file(
+        path,
+        as_attachment=True,
+        download_name=filename,
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+
 
 @app.route("/download/clean/<path:filename>")
 def download_clean_file(filename: str):
@@ -797,6 +1086,4 @@ if __name__ == "__main__":
     with app.app_context():
         get_db()
     app.run(debug=True, host="127.0.0.1", port=8000, use_reloader=False)
-
-
 
