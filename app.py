@@ -339,7 +339,7 @@ CHECK_HTML = """
           <thead>
             <tr>
               <th style="width: 1%;"></th>
-              <th>Магазин</th>
+              <th>Название</th>
               <th>Начало</th>
               <th>Конец</th>
               <th>Позиций</th>
@@ -471,7 +471,7 @@ LISTS_HTML = """
 
   <form method="get" class="row g-2 mt-3">
     <div class="col-md-3">
-      <label class="form-label">Магазин</label>
+      <label class="form-label">Название</label>
       <input type="text" name="owner" class="form-control"
              value="{{ filter_owner or '' }}"
              placeholder="Например, ЛитРес">
@@ -517,7 +517,7 @@ LISTS_HTML = """
     <table class="table table-sm">
       <thead>
         <tr>
-          <th>Магазин</th>
+          <th>Название</th>
           <th>Начало</th>
           <th>Конец</th>
           <th>Позиций</th>
