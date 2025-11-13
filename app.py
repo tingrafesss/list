@@ -474,7 +474,7 @@ LISTS_HTML = """
       <label class="form-label">Название</label>
       <input type="text" name="owner" class="form-control"
              value="{{ filter_owner or '' }}"
-             placeholder="Например, ЛитРес">
+             placeholder="Название">
     </div>
     <div class="col-md-3">
       <label class="form-label">Начало не раньше</label>
